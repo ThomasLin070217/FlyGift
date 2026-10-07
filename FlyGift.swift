@@ -198,13 +198,30 @@ final class RetroPaperView: NSView {
 }
 
 final class SwatterGraphicView: NSView {
+    /// Everything below draws in this fixed space. The view's *frame* is what
+    /// grows during the power-up, so AppKit scales the whole swatter — head,
+    /// handle and perforations — by the same factor the hit geometry uses.
+    static let baseSize = NSSize(width: 105, height: 135)
     var swing: CGFloat = 0 { didSet { needsDisplay = true } }
+    var boosted = false { didSet { needsDisplay = true } }
     var onClick: (() -> Void)? { didSet { window?.invalidateCursorRects(for: self) } }
     private lazy var swatterImage: NSImage? = {
         guard let url = findResource("swatter-red-v3.png")
                 ?? findResource("assets/swatter-red-v3.png") else { return nil }
         return NSImage(contentsOf: url)
     }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        bounds = NSRect(origin: .zero, size: Self.baseSize)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if bounds.size != Self.baseSize { bounds = NSRect(origin: .zero, size: Self.baseSize) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         NSGraphicsContext.current?.saveGraphicsState()
@@ -219,6 +236,15 @@ final class SwatterGraphicView: NSView {
                                        dy: max(2, bounds.height * 0.025))
             image.draw(in: inset, from: .zero, operation: .sourceOver, fraction: 1,
                        respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
+            if boosted {
+                // Tint only the swatter's own pixels so the buff reads without
+                // any extra chrome or a halo that could drift from the head.
+                NSGraphicsContext.current?.saveGraphicsState()
+                NSGraphicsContext.current?.compositingOperation = .sourceAtop
+                NSColor(calibratedRed: 1.0, green: 0.82, blue: 0.28, alpha: 0.32).setFill()
+                NSBezierPath(rect: inset).fill()
+                NSGraphicsContext.current?.restoreGraphicsState()
+            }
             NSGraphicsContext.current?.restoreGraphicsState()
             return
         }
@@ -586,15 +612,42 @@ final class GiftWindowController: NSWindowController {
 }
 
 final class SwatterOverlayController {
+    /// Base geometry, all in the swatter's own coordinate space. The power-up
+    /// multiplies every one of these by `scale`, so the rendered graphic, the
+    /// pointer offset and the hit shape stay locked together.
+    static let basePanel = NSSize(width: 105, height: 135)
+    static let pointerInset = CGPoint(x: 52, y: 115)
+    static let pivotDrop: CGFloat = 105
+    static let headOffset: CGFloat = 92
+    static let headSize = CGSize(width: 72, height: 54)
+
+    /// Shake-to-grow buff: a few sharp cursor reversals arm it, the head then
+    /// stays enlarged for `boostDuration`. A bigger head also subtends a bigger
+    /// looming stimulus, so the fly spooks sooner — the buff trades precision
+    /// for reach rather than being a free win.
+    private static let boostedScale: CGFloat = 1.7
+    private static let boostDuration: TimeInterval = 4
+    private static let boostLockout: TimeInterval = 0.8
+    private static let shakeMinSpeed: CGFloat = 800
+    private static let shakeThreshold: CGFloat = 2.5
+
     private let panel: NSPanel
     private let graphic: SwatterGraphicView
     private(set) var armed = false
     private(set) var isSwinging = false
+    private(set) var scale: CGFloat = 1
     private var animationTimer: Timer?
     private var swingPhase: CGFloat = 0
 
+    private var lastPointer: CGPoint?
+    private var lastPointerTime: TimeInterval?
+    private var previousVelocity: CGPoint?
+    private var shakeEnergy: CGFloat = 0
+    private var boostUntil: TimeInterval = 0
+    private var lastBoostAt: TimeInterval = -.greatestFiniteMagnitude
+
     init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 105, height: 135), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.basePanel.width, height: Self.basePanel.height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         panel.ignoresMouseEvents = true; panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -605,13 +658,57 @@ final class SwatterOverlayController {
     func arm() {
         guard !armed else { return }
         armed = true
+        resetShake()
         CGDisplayHideCursor(CGMainDisplayID())
         panel.orderFrontRegardless()
     }
 
+    /// Runs once per frame while the swatter is held: watches the cursor for a
+    /// back-and-forth shake and keeps the head size in sync with the buff.
+    func update(now: TimeInterval, pointer: CGPoint) {
+        guard armed else { resetShake(); return }
+        if let last = lastPointer, let lastTime = lastPointerTime, now > lastTime {
+            let dt = now - lastTime
+            let velocity = CGPoint(x: (pointer.x - last.x) / dt, y: (pointer.y - last.y) / dt)
+            let speed = hypot(velocity.x, velocity.y)
+            shakeEnergy *= CGFloat(exp(-dt / 0.28))
+            if speed > Self.shakeMinSpeed, let previous = previousVelocity {
+                let previousSpeed = hypot(previous.x, previous.y)
+                let alignment = (velocity.x * previous.x + velocity.y * previous.y)
+                    / (speed * previousSpeed)
+                if alignment < -0.4 { shakeEnergy += 1 }   // sharp direction reversal
+            }
+            previousVelocity = speed > Self.shakeMinSpeed ? velocity : nil
+            if shakeEnergy >= Self.shakeThreshold, now - lastBoostAt > Self.boostLockout {
+                lastBoostAt = now
+                boostUntil = now + Self.boostDuration
+                shakeEnergy = 0
+            }
+        }
+        lastPointer = pointer
+        lastPointerTime = now
+        apply(scale: now < boostUntil ? Self.boostedScale : 1, pointer: pointer)
+    }
+
+    private func apply(scale wanted: CGFloat, pointer: CGPoint) {
+        if wanted != scale {
+            scale = wanted
+            graphic.boosted = wanted > 1
+            panel.setContentSize(NSSize(width: Self.basePanel.width * wanted,
+                                        height: Self.basePanel.height * wanted))
+        }
+        move(to: pointer)
+    }
+
+    private func resetShake() {
+        lastPointer = nil; lastPointerTime = nil
+        previousVelocity = nil; shakeEnergy = 0; boostUntil = 0
+    }
+
     func move(to point: CGPoint) {
         guard armed else { return }
-        panel.setFrameOrigin(NSPoint(x: point.x - 52, y: point.y - 115))
+        panel.setFrameOrigin(NSPoint(x: point.x - Self.pointerInset.x * scale,
+                                     y: point.y - Self.pointerInset.y * scale))
     }
 
     func swing() {
@@ -638,12 +735,14 @@ final class SwatterOverlayController {
     func headSample(at pointer: CGPoint) -> SwatterHeadSample? {
         guard armed else { return nil }
         let angle = (-10 - swingPhase * 34) * .pi / 180
-        let pivot = CGPoint(x: pointer.x, y: pointer.y - 105)
-        let headVector = CGPoint(x: 0, y: 92)
+        let pivot = CGPoint(x: pointer.x, y: pointer.y - Self.pivotDrop * scale)
+        let headVector = CGPoint(x: 0, y: Self.headOffset * scale)
         let c = cos(angle), s = sin(angle)
         let center = CGPoint(x: pivot.x + headVector.x * c - headVector.y * s,
                              y: pivot.y + headVector.x * s + headVector.y * c)
-        return SwatterHeadSample(center: center, size: CGSize(width: 72, height: 54),
+        return SwatterHeadSample(center: center,
+                                 size: CGSize(width: Self.headSize.width * scale,
+                                              height: Self.headSize.height * scale),
                                  angle: angle, swing: swingPhase)
     }
 
@@ -651,6 +750,12 @@ final class SwatterOverlayController {
         animationTimer?.invalidate(); animationTimer = nil
         isSwinging = false
         swingPhase = 0; graphic.swing = 0
+        if scale != 1 {
+            scale = 1
+            graphic.boosted = false
+            panel.setContentSize(Self.basePanel)
+        }
+        resetShake()
         panel.orderOut(nil)
         guard armed else { return }
         armed = false

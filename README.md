@@ -37,6 +37,9 @@ catch it while it is grounded.
 - Collision is swept across the full 220 ms swing rather than sampled only on
   mouse-down. A 140 ms takeoff grace window resolves visible last-moment contact,
   and every landing gets a brief 480 ms GF refractory opportunity.
+- Shake the cursor back and forth to arm the power-up: the whole swatter—graphic
+  and hit shape together—grows to 1.7× for 4 seconds. The enlarged head subtends
+  a bigger looming stimulus, so it reaches further but spooks the fly sooner.
 - A successful hit leaves an original macro-style insect residue for one beat,
   then a cyan scan ring dissolves it into blue-and-gold luminous data particles:
   the physical prank becomes the digital-life reveal.

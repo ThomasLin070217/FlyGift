@@ -1098,7 +1098,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updatePointerAndEnvironment() {
         let loc = NSEvent.mouseLocation
-        swatterOverlay.move(to: loc)
+        swatterOverlay.update(now: ProcessInfo.processInfo.systemUptime, pointer: loc)
         let head = swatterOverlay.headSample(at: loc)
         let sensed = head?.center ?? loc
         coordinator.setThreat(CGPoint(x: sensed.x - screenFrame.midX,
