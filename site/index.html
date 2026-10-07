@@ -59,6 +59,26 @@
           <button id="recipient-copy-button" class="secondary" type="button" data-copy="copy"></button>
         </div>
         <p id="device-note" class="device-note"></p>
+
+        <div class="alt-install">
+          <p class="alt-title" data-copy="altTitle"></p>
+
+          <div class="alt-option">
+            <span class="alt-label" data-copy="altCmdLabel"></span>
+            <div class="cmd">
+              <code id="install-cmd">curl -fsSL https://thomaslin070217.github.io/FlyGift/install.sh | zsh</code>
+              <button id="install-cmd-copy" type="button" data-copy="altCopy"></button>
+            </div>
+            <p class="alt-hint" data-copy="altCmdHint"></p>
+          </div>
+
+          <div class="alt-option">
+            <span class="alt-label" data-copy="altFileLabel"></span>
+            <a class="secondary button-link" href="./Install-FlyGift.command" download data-copy="altDownload"></a>
+            <p class="alt-hint" data-copy="altFileHint"></p>
+          </div>
+        </div>
+
         <div id="open-help" class="open-help" hidden>
           <strong data-copy="downloaded"></strong>
           <ol>

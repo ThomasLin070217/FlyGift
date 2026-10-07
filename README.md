@@ -81,6 +81,22 @@ it cannot verify the developer, review the source and use the app-specific
 **System Settings → Privacy & Security → Open Anyway** option if offered.
 Control-click is not a reliable first-launch instruction on recent macOS versions.
 
+Two installers remove that friction entirely. `com.apple.quarantine` is stamped by
+the downloading *application* (Safari, Chrome, Edge); `curl` does not stamp it, so
+anything these scripts fetch reaches Gatekeeper unflagged. Both install to
+`/Applications` (falling back to `~/Applications` when that is not writable), clear
+any stray quarantine flag, and launch the app when they finish.
+
+**One-line command** — served from `site/install.sh`:
+
+```sh
+curl -fsSL https://thomaslin070217.github.io/FlyGift/install.sh | zsh
+```
+
+**Double-click installer** — [`site/Install-FlyGift.command`](site/Install-FlyGift.command).
+macOS asks once whether to open a script downloaded from the Internet; click
+**Open**. If the browser drops the executable bit, right-click → Open instead.
+
 An **“app is damaged”** warning is a different failure. Download a fresh copy and
 compare its ZIP checksum with `SHA256SUMS.txt`. If it persists, report the exact
 message and macOS version rather than disabling Gatekeeper. A valid local signature
